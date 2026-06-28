@@ -1,5 +1,17 @@
 # minimatrix
 
+## PWA frontend
+
+Tiny Matrix frontend.
+
+### Features
+
+- Single room. No room switching.
+- Limited message sending. Only voice notes and emojis (with a custom emoji picker).
+- Full message reception, history support, media playback.
+- No e2ee.
+- Magic link contains homeserver, username, password, roomId (or the user's only room if omitted).
+
 ## Continuwuity backend
 
 ### Local testing
