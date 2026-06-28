@@ -2,7 +2,7 @@
 // fill in the fields, copy the generated link (or open it straight away), and
 // save it to the child's home screen. Prefilled from any partial link present.
 
-import { buildHash, type RawParams } from "./config";
+import { buildUrlFragment, type RawParams } from "./config";
 
 const FIELDS = [
   { key: "homeserver", label: "Homeserver", placeholder: "matrix.example", type: "text" },
@@ -93,16 +93,15 @@ export function renderSetup(root: HTMLElement, prefill: RawParams): void {
     event.preventDefault();
     const fields = currentFields();
     if (!isComplete(fields)) return;
-    // Re-enter the app with the new link; main.ts reads the hash on load.
-    location.hash = buildHash(fields);
-    location.reload();
+    // Re-enter the app with the new link; main.ts reads the URL fragment on load.
+    location.assign(linkFor(fields));
   });
 
   refresh();
 }
 
 function linkFor(fields: RawParams): string {
-  return `${location.origin}${location.pathname}${buildHash(fields)}`;
+  return `${location.origin}${location.pathname}${buildUrlFragment(fields)}`;
 }
 
 async function copyToClipboard(text: string, fallback: HTMLInputElement): Promise<void> {

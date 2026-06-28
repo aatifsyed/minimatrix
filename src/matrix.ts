@@ -15,6 +15,13 @@ import {
   type Room,
 } from "matrix-js-sdk";
 import type { Config } from "./config";
+import {
+  isUsableRoom,
+  NO_ROOM_ERROR,
+  pickDefaultRoom,
+  REQUESTED_ROOM_ERROR,
+  type RoomPick,
+} from "./rooms";
 
 export type MessageKind = "text" | "emoji" | "image" | "audio" | "video" | "file" | "unknown";
 
@@ -193,7 +200,12 @@ export class Matrix {
   private async onPrepared(): Promise<void> {
     if (this.ready) return; // PREPARED fires once, but guard against re-entry.
 
-    let room = this.pickRoom();
+    const pick = this.pickRoom();
+    if (pick.error) {
+      this.onError?.(pick.error);
+      return;
+    }
+    let room = pick.room;
 
     // Standing invite? Accept it and drop into the now-joined room.
     if (room?.getMyMembership() === "invite") {
@@ -207,7 +219,7 @@ export class Matrix {
     }
 
     if (!room) {
-      this.onError?.("No room is available for this account yet.");
+      this.onError?.(NO_ROOM_ERROR);
       return;
     }
 
@@ -226,17 +238,12 @@ export class Matrix {
     this.onReady?.();
   }
 
-  private pickRoom(): Room | undefined {
+  private pickRoom(): RoomPick<Room> {
     if (this.config.room) {
-      return this.client.getRoom(this.config.room) ?? undefined;
+      const room = this.client.getRoom(this.config.room) ?? undefined;
+      return room && isUsableRoom(room) ? { room } : { error: REQUESTED_ROOM_ERROR };
     }
-    // Prefer a room we're already in; fall back to one we've been invited to.
-    const rooms = this.client.getRooms();
-    return (
-      rooms.find((r) => r.getMyMembership() === "join") ??
-      rooms.find((r) => r.getMyMembership() === "invite") ??
-      rooms[0]
-    );
+    return pickDefaultRoom(this.client.getRooms());
   }
 
   // Render a single event exactly once. Returns null for anything that isn't a

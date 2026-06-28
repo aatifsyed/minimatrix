@@ -1,5 +1,5 @@
 import "./style.css";
-import { parseConfig, readParams } from "./config";
+import { readParams, resolveConfig } from "./config";
 import { Matrix } from "./matrix";
 import { App } from "./app";
 import { renderSetup } from "./setup";
@@ -10,15 +10,15 @@ if (root) start(root);
 function start(root: HTMLDivElement): void {
   registerServiceWorker();
 
-  const config = parseConfig(location.hash);
-  if (!config) {
+  const resolved = resolveConfig(currentUrlFragment());
+  if (!resolved.config) {
     // No (or incomplete) link: show the setup form, prefilled with whatever
     // partial params were present so a half-built link can be finished.
-    renderSetup(root, readParams(location.hash));
+    renderSetup(root, resolved.params);
     return;
   }
 
-  const matrix = new Matrix(config);
+  const matrix = new Matrix(resolved.config);
   const app = new App(matrix);
   app.mount(root);
 
@@ -27,12 +27,17 @@ function start(root: HTMLDivElement): void {
     // let the parent jump back to the form, prefilled, to fix it.
     app.fatal(error instanceof Error ? error.message : "Couldn't connect.", () => {
       matrix.stop();
-      renderSetup(root, readParams(location.hash));
+      renderSetup(root, readParams(resolved.urlFragment));
     });
   });
 
   // Hang up cleanly so we don't leak sync connections on navigation away.
   window.addEventListener("pagehide", () => matrix.stop());
+}
+
+function currentUrlFragment(): string {
+  const marker = location.href.indexOf("#");
+  return marker === -1 ? "" : location.href.slice(marker);
 }
 
 function registerServiceWorker(): void {

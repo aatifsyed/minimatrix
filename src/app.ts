@@ -101,13 +101,20 @@ export class App {
 
     this.chunks = [];
     this.recordStart = Date.now();
-    const recorder = new MediaRecorder(stream, pickRecorderOptions());
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, pickRecorderOptions());
+    } catch {
+      stopStream(stream);
+      this.toast("Recording unsupported");
+      return;
+    }
 
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data.size > 0) this.chunks.push(event.data);
     });
     recorder.addEventListener("stop", () => {
-      stream.getTracks().forEach((track) => track.stop());
+      stopStream(stream);
       this.recorder = undefined;
       const duration = Date.now() - this.recordStart;
       const blob = new Blob(this.chunks, { type: this.chunks[0]?.type || "audio/webm" });
@@ -117,7 +124,14 @@ export class App {
     });
 
     this.recorder = recorder;
-    recorder.start();
+    try {
+      recorder.start();
+    } catch {
+      this.recorder = undefined;
+      stopStream(stream);
+      this.toast("Recording unsupported");
+      return;
+    }
     this.setMic("recording");
   }
 
@@ -281,7 +295,9 @@ export class App {
     void this.matrix
       .loadOlder()
       .then((older) => {
-        for (const message of older) this.addMessage(message, false, true);
+        for (const message of oldestFirstToPrependOrder(older)) {
+          this.addMessage(message, false, true);
+        }
       })
       .finally(() => {
         this.loadingOlder = false;
@@ -334,6 +350,14 @@ function pickRecorderOptions(): MediaRecorderOptions | undefined {
     }
   }
   return undefined;
+}
+
+export function oldestFirstToPrependOrder<T>(items: readonly T[]): T[] {
+  return [...items].reverse();
+}
+
+function stopStream(stream: MediaStream): void {
+  stream.getTracks().forEach((track) => track.stop());
 }
 
 function byId(root: HTMLElement, id: string): HTMLElement {
