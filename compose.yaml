@@ -1,0 +1,53 @@
+name: minimatrix-continuwuity
+
+services:
+    continuwuity:
+        image: forgejo.ellis.link/continuwuation/continuwuity:latest
+        restart: unless-stopped
+        environment:
+            CONTINUWUITY_SERVER_NAME: ${MATRIX_DOMAIN:?}
+            CONTINUWUITY_DATABASE_PATH: /var/lib/continuwuity
+            CONTINUWUITY_ADDRESS: 0.0.0.0
+            CONTINUWUITY_PORT: 8008
+            CONTINUWUITY_ALLOW_FEDERATION: "false"
+            CONTINUWUITY_ALLOW_ENCRYPTION: "false" # no e2ee
+            CONTINUWUITY_ALLOW_REGISTRATION: "false" # admin account from logs
+        volumes:
+            - continuwuity_data:/var/lib/continuwuity
+        networks: [ internal ] # via caddy - no "ports:" section!
+
+    caddy:
+        image: caddy:2
+        restart: unless-stopped
+        depends_on: [ continuwuity ]
+        ports:
+            - "80:80"
+            - "443:443"
+            - "443:443/udp" # HTTP/3
+        configs:
+            - source: caddyfile
+              target: /etc/caddy/Caddyfile
+        volumes:
+            - caddy_data:/data # TLS certificates and keys
+            - caddy_config:/config
+            - /var/log/caddy:/var/log/caddy # for fail2ban
+        networks: [ internal ]
+
+configs:
+    caddyfile:
+        content: |
+            ${MATRIX_DOMAIN:?} {
+              log {
+                output file /var/log/caddy/access.log
+                format json
+              }
+              reverse_proxy continuwuity:8008
+            }
+
+volumes:
+    continuwuity_data:
+    caddy_data:
+    caddy_config:
+
+networks:
+    internal:
