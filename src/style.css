@@ -213,7 +213,9 @@ body {
   display: none;
 }
 
-.emoji {
+/* Scoped to the composer strip: a bare `.emoji` would also match emoji
+   *message* rows (class `msg … emoji`) and force them into a 64px button box. */
+.emojis .emoji {
   flex: none;
   width: var(--touch);
   height: var(--touch);
@@ -225,10 +227,10 @@ body {
   box-shadow: var(--shadow);
   cursor: pointer;
 }
-.emoji:active {
+.emojis .emoji:active {
   transform: scale(0.9);
 }
-.emoji.pop {
+.emojis .emoji.pop {
   animation: pop 0.3s ease;
 }
 
