@@ -11,6 +11,10 @@ Tiny Matrix frontend.
 - Full message reception, history support, media playback.
 - No e2ee.
 - Magic link contains homeserver, username, password, roomId (or the user's only room if omitted).
+  The link embeds the account password — treat it as a secret; anyone with it has full account
+  access. The password is used once to log in, then a per-device access token is persisted and
+  reused on later launches (so each install stays on a single device rather than minting a new one
+  every time).
 
 ## Continuwuity backend
 

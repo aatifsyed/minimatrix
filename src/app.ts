@@ -18,6 +18,7 @@ export class App {
   private chunks: Blob[] = [];
   private recordStart = 0;
   private loadingOlder = false;
+  private reachedStart = false;
   private hasInteracted = false;
 
   constructor(matrix: Matrix) {
@@ -206,6 +207,12 @@ export class App {
         img.className = "photo";
         img.alt = message.body || "photo";
         img.loading = "lazy";
+        // Reserve the right aspect ratio up front so the image doesn't shove the
+        // timeline (or the prepend scroll-anchor) around when it finally loads.
+        if (message.width && message.height) {
+          img.width = message.width;
+          img.height = message.height;
+        }
         this.loadMedia(
           message.mxc,
           (url) => {
@@ -241,10 +248,15 @@ export class App {
         video.controls = true;
         video.playsInline = true;
         video.preload = "metadata";
+        if (message.width && message.height) {
+          video.width = message.width;
+          video.height = message.height;
+        }
         this.loadMedia(
           message.mxc,
           (url) => {
             video.src = url;
+            this.scrollIfStuck();
           },
           bubble,
         );
@@ -290,11 +302,14 @@ export class App {
   // --- scrolling -----------------------------------------------------------
 
   private onScroll(): void {
-    if (this.timeline.scrollTop > 60 || this.loadingOlder) return;
+    if (this.reachedStart || this.timeline.scrollTop > 60 || this.loadingOlder) return;
     this.loadingOlder = true;
     void this.matrix
       .loadOlder()
       .then((older) => {
+        // An empty page means we've paged back to the start of the room; stop
+        // firing a fresh request on every scroll event while parked at the top.
+        if (older.length === 0) this.reachedStart = true;
         for (const message of oldestFirstToPrependOrder(older)) {
           this.addMessage(message, false, true);
         }

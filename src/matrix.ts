@@ -22,6 +22,7 @@ import {
   REQUESTED_ROOM_ERROR,
   type RoomPick,
 } from "./rooms";
+import { clearSession, loadSession, saveSession, type Session } from "./session";
 
 export type MessageKind = "text" | "emoji" | "image" | "audio" | "video" | "file" | "unknown";
 
@@ -35,6 +36,8 @@ export interface Message {
   mxc?: string;
   mimetype?: string;
   duration?: number;
+  width?: number;
+  height?: number;
   isVoice: boolean;
   mine: boolean;
 }
@@ -42,6 +45,10 @@ export interface Message {
 export type Status = "connecting" | "online" | "offline";
 
 const TIMELINE_LIMIT = 30;
+
+// Object URLs we mint for media. Bounded so a long browsing session doesn't grow
+// the blob set without limit; the least-recently-used URL is revoked on overflow.
+const MEDIA_CACHE_LIMIT = 64;
 
 export class Matrix {
   onMessage?: (message: Message, live: boolean) => void;
@@ -57,6 +64,7 @@ export class Matrix {
   private ready = false;
   private readonly rendered = new Set<string>();
   private readonly mediaCache = new Map<string, string>();
+  private readonly mediaInflight = new Map<string, Promise<string>>();
 
   constructor(config: Config) {
     this.config = config;
@@ -65,25 +73,58 @@ export class Matrix {
   async start(): Promise<void> {
     this.onStatus?.("connecting");
     const baseUrl = this.config.homeserver;
-
-    const login = createClient({ baseUrl });
-    const session = await login.loginWithPassword(this.config.user, this.config.password);
+    const session = await this.resolveSession(baseUrl);
 
     this.client = createClient({
       baseUrl,
-      accessToken: session.access_token,
-      userId: session.user_id,
-      deviceId: session.device_id,
+      accessToken: session.accessToken,
+      userId: session.userId,
+      deviceId: session.deviceId,
     });
 
     this.bindEvents();
     await this.client.startClient({ initialSyncLimit: TIMELINE_LIMIT });
   }
 
+  // Reuse a stored token while it still works; otherwise log in fresh. This keeps
+  // each install pinned to one device rather than minting a new one per launch.
+  private async resolveSession(baseUrl: string): Promise<Session> {
+    const saved = loadSession(baseUrl, this.config.user);
+    if (saved && (await this.tokenStillValid(baseUrl, saved.accessToken))) return saved;
+    if (saved) clearSession(baseUrl, this.config.user);
+    return this.login(baseUrl);
+  }
+
+  private async login(baseUrl: string): Promise<Session> {
+    const login = createClient({ baseUrl });
+    const result = await login.loginWithPassword(this.config.user, this.config.password);
+    const session: Session = {
+      accessToken: result.access_token,
+      deviceId: result.device_id,
+      userId: result.user_id,
+    };
+    saveSession(baseUrl, this.config.user, session);
+    return session;
+  }
+
+  // Cheap auth check before we commit to a full sync: a revoked or expired token
+  // (device pruned, password changed elsewhere) returns 401 here and we re-login.
+  private async tokenStillValid(baseUrl: string, accessToken: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${baseUrl}/_matrix/client/v3/account/whoami`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   stop(): void {
     this.client?.stopClient();
     for (const url of this.mediaCache.values()) URL.revokeObjectURL(url);
     this.mediaCache.clear();
+    this.mediaInflight.clear();
   }
 
   // --- sending -------------------------------------------------------------
@@ -121,12 +162,14 @@ export class Matrix {
     const sizeBefore = room.getLiveTimeline().getEvents().length;
     await this.client.scrollback(room, TIMELINE_LIMIT);
     const events = room.getLiveTimeline().getEvents();
-    if (events.length === sizeBefore) return [];
+    const added = events.length - sizeBefore;
+    if (added <= 0) return [];
 
-    // Events are chronological (oldest first); the freshly fetched ones are the
-    // not-yet-rendered prefix. Returned oldest-first, ready to prepend in order.
+    // Backward pagination prepends to the live timeline, so the freshly fetched
+    // events are exactly the leading `added`. Walk only those (not the whole
+    // timeline) and return them oldest-first, ready to prepend in order.
     const older: Message[] = [];
-    for (const event of events) {
+    for (const event of events.slice(0, added)) {
       const message = this.consume(event);
       if (message) older.push(message);
     }
@@ -140,12 +183,38 @@ export class Matrix {
   // We fetch with the access token and hand back a local object URL instead.
   async mediaUrl(mxc: string): Promise<string> {
     const cached = this.mediaCache.get(mxc);
-    if (cached) return cached;
+    if (cached) {
+      // Touch to mark most-recently-used (Map keeps insertion order).
+      this.mediaCache.delete(mxc);
+      this.mediaCache.set(mxc, cached);
+      return cached;
+    }
 
-    const blob = await this.fetchMedia(mxc);
-    const url = URL.createObjectURL(blob);
-    this.mediaCache.set(mxc, url);
-    return url;
+    // Coalesce concurrent requests for the same media (e.g. the same photo in
+    // both history and a live echo) so we fetch and mint one object URL.
+    let inflight = this.mediaInflight.get(mxc);
+    if (!inflight) {
+      inflight = this.fetchMedia(mxc)
+        .then((blob) => {
+          const url = URL.createObjectURL(blob);
+          this.mediaCache.set(mxc, url);
+          this.evictMedia();
+          return url;
+        })
+        .finally(() => this.mediaInflight.delete(mxc));
+      this.mediaInflight.set(mxc, inflight);
+    }
+    return inflight;
+  }
+
+  private evictMedia(): void {
+    while (this.mediaCache.size > MEDIA_CACHE_LIMIT) {
+      const oldest = this.mediaCache.keys().next().value;
+      if (oldest === undefined) break;
+      const url = this.mediaCache.get(oldest);
+      if (url) URL.revokeObjectURL(url);
+      this.mediaCache.delete(oldest);
+    }
   }
 
   private async fetchMedia(mxc: string): Promise<Blob> {
@@ -283,6 +352,8 @@ export class Matrix {
           body: String(content.body ?? ""),
           mxc: content.url,
           mimetype: content.info?.mimetype,
+          width: dimension(content.info?.w),
+          height: dimension(content.info?.h),
         };
       case "m.audio":
         return {
@@ -301,6 +372,8 @@ export class Matrix {
           body: String(content.body ?? ""),
           mxc: content.url,
           mimetype: content.info?.mimetype,
+          width: dimension(content.info?.w),
+          height: dimension(content.info?.h),
         };
       case "m.file":
         return {
@@ -314,6 +387,12 @@ export class Matrix {
         return { ...base, kind: "unknown", body: String(content.body ?? "") };
     }
   }
+}
+
+// A positive, finite pixel dimension from event `info`, or undefined. Used to
+// reserve layout space before media loads so the timeline doesn't jump.
+function dimension(value: unknown): number | undefined {
+  return typeof value === "number" && value > 0 && Number.isFinite(value) ? value : undefined;
 }
 
 function shortName(userId: string): string {
