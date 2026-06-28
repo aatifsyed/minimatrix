@@ -1,0 +1,9 @@
+{
+  "name": "minimatrix",
+  "compatibility_date": "2026-06-28",
+  "assets": {
+    "directory": "./dist",
+    // Unknown paths fall back to index.html (the app is a single page).
+    "not_found_handling": "single-page-application",
+  },
+}
