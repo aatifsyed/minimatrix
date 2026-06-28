@@ -9,6 +9,9 @@
     "preview": "vp preview",
     "prepare": "vp config"
   },
+  "dependencies": {
+    "matrix-js-sdk": "^41.8.0"
+  },
   "devDependencies": {
     "typescript": "~6.0.2",
     "vite": "catalog:",

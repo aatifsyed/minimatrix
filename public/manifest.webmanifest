@@ -1,0 +1,19 @@
+{
+  "name": "minimatrix",
+  "short_name": "minimatrix",
+  "description": "A tiny Matrix chat for a small person.",
+  "start_url": ".",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff7e6",
+  "theme_color": "#ffd34e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
